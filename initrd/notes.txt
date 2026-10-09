@@ -1,0 +1,4 @@
+sovetnikOS notes
+- bump allocator at _kernel_end
+- tar parser reads ustar
+- shell commands: help, about, clear, mem, kmalloc, ls, cat, reboot

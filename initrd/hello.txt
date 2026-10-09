@@ -1,0 +1,2 @@
+Hello from initrd!
+This file was loaded by GRUB as a multiboot module.

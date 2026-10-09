@@ -1,56 +1,48 @@
-AS = nasm
-CC = gcc
-LD = ld
+CC      := gcc
+AS      := nasm
+LD      := ld
+CFLAGS  := -m32 -ffreestanding -nostdlib -fno-stack-protector -fno-pic \
+           -fno-builtin -Wall -Wextra -O2 -Iinclude
+LDFLAGS := -m elf_i386 -T linker.ld -nostdlib
 
-CFLAGS = -m32 -ffreestanding -fno-pie -fno-stack-protector -nostdlib -nostdinc -Wall -Wextra
-LDFLAGS = -m elf_i386 -T linker.ld
+BUILD   := build
+KERNEL  := $(BUILD)/kernel.bin
+ISO     := $(BUILD)/sovetnikOS.iso
+INITRD  := $(BUILD)/initrd.tar
 
-BUILD = build
+C_SRCS  := $(wildcard kernel/*.c) $(wildcard fs/*.c)
+ASM_SRCS:= $(wildcard boot/*.asm)
 
-OBJECTS = \
-	$(BUILD)/boot.o \
-	$(BUILD)/kernel.o \
-	$(BUILD)/keyboard.o \
-	$(BUILD)/mouse.o \
-	$(BUILD)/gui.o \
-	$(BUILD)/console.o
+C_OBJS  := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS))
+ASM_OBJS:= $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
+OBJS    := $(ASM_OBJS) $(C_OBJS)
 
-all: $(BUILD)/sovetnikOS.iso
+all: $(ISO)
 
-$(BUILD):
-	mkdir -p $(BUILD)
+$(BUILD)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD)/boot.o: boot/boot.asm | $(BUILD)
-	$(AS) -f elf32 boot/boot.asm -o $@
+$(BUILD)/%.o: %.asm
+	@mkdir -p $(dir $@)
+	$(AS) -f elf32 $< -o $@
 
-$(BUILD)/kernel.o: kernel/kernel.c | $(BUILD)
-	$(CC) $(CFLAGS) -c kernel/kernel.c -o $@
+$(KERNEL): $(OBJS) linker.ld
+	$(LD) $(LDFLAGS) -o $@ $(OBJS)
 
-$(BUILD)/keyboard.o: drivers/keyboard.c | $(BUILD)
-	$(CC) $(CFLAGS) -c drivers/keyboard.c -o $@
+$(INITRD): $(shell find initrd -type f 2>/dev/null)
+	@mkdir -p $(BUILD)
+	tar --format=ustar -cf $@ -C initrd .
 
-$(BUILD)/mouse.o: drivers/mouse.c | $(BUILD)
-	$(CC) $(CFLAGS) -c drivers/mouse.c -o $@
-
-$(BUILD)/gui.o: gui/gui.c | $(BUILD)
-	$(CC) $(CFLAGS) -c gui/gui.c -o $@
-
-$(BUILD)/console.o: kernel/console.c | $(BUILD)
-	$(CC) $(CFLAGS) -c kernel/console.c -o $@
-
-$(BUILD)/kernel.bin: $(OBJECTS) linker.ld
-	$(LD) $(LDFLAGS) -o $@ $(OBJECTS)
-
-$(BUILD)/iso:
-	mkdir -p $(BUILD)/iso/boot/grub
-
-$(BUILD)/sovetnikOS.iso: $(BUILD)/kernel.bin $(BUILD)/iso
-	cp $(BUILD)/kernel.bin $(BUILD)/iso/boot/kernel.bin
-	cp boot/grub.cfg $(BUILD)/iso/boot/grub/grub.cfg
+$(ISO): $(KERNEL) $(INITRD) grub.cfg
+	@mkdir -p $(BUILD)/iso/boot/grub
+	cp $(KERNEL) $(BUILD)/iso/boot/kernel.bin
+	cp $(INITRD) $(BUILD)/iso/boot/initrd.tar
+	cp grub.cfg $(BUILD)/iso/boot/grub/grub.cfg
 	grub-mkrescue -o $@ $(BUILD)/iso
 
-run: $(BUILD)/sovetnikOS.iso
-	qemu-system-i386 -cdrom $(BUILD)/sovetnikOS.iso
+run: $(ISO)
+	qemu-system-i386 -cdrom $(ISO)
 
 clean:
 	rm -rf $(BUILD)

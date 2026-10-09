@@ -1,0 +1,15 @@
+# Артефакты сборки
+build/
+*.o
+*.bin
+*.iso
+
+# Редакторы
+*.swp
+*~
+.vscode/
+.idea/
+
+# ОС
+.DS_Store
+Thumbs.db
