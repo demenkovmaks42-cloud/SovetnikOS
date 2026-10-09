@@ -1,0 +1,1 @@
+This sovetnikOS 0.1 starter project is provided for educational use.
