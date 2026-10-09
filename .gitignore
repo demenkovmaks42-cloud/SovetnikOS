@@ -13,3 +13,4 @@ build/
 # ОС
 .DS_Store
 Thumbs.db
+disk.img
