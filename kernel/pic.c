@@ -1,52 +1,56 @@
 #include "pic.h"
 
-static inline void outb(uint16_t port, uint8_t val) {
-    __asm__ volatile ("outb %0, %1" :: "a"(val), "Nd"(port));
-}
-static inline uint8_t inb(uint16_t port) {
-    uint8_t r;
-    __asm__ volatile ("inb %1, %0" : "=a"(r) : "Nd"(port));
-    return r;
-}
-static inline void io_wait(void) { outb(0x80, 0); }
+#define PIC1_COMMAND 0x20
+#define PIC1_DATA    0x21
+#define PIC2_COMMAND 0xA0
+#define PIC2_DATA    0xA1
 
-void pic_init(void) {
-    /* ICW1: начало инициализации */
-    outb(PIC1_CMD,  0x11); io_wait();
-    outb(PIC2_CMD,  0x11); io_wait();
-    /* ICW2: смещение векторов */
-    outb(PIC1_DATA, 0x20); io_wait();   /* IRQ0..7  → int 32..39 */
-    outb(PIC2_DATA, 0x28); io_wait();   /* IRQ8..15 → int 40..47 */
-    /* ICW3: связь master-slave */
-    outb(PIC1_DATA, 0x04); io_wait();
-    outb(PIC2_DATA, 0x02); io_wait();
-    /* ICW4: 8086 mode */
-    outb(PIC1_DATA, 0x01); io_wait();
-    outb(PIC2_DATA, 0x01); io_wait();
-    /* Маскируем всё, кроме IRQ0 (таймер) и IRQ1 (клавиатура) */
-    outb(PIC1_DATA, 0xFC);   /* 1111 1100 — разрешены IRQ0 и IRQ1 */
-    outb(PIC2_DATA, 0xFF);   /* всё запрещено */
+#define PIC_EOI      0x20
+
+static inline void outb(uint16_t port, uint8_t value)
+{
+    __asm__ volatile (
+        "outb %0, %1"
+        :
+        : "a"(value), "Nd"(port)
+    );
 }
 
-void pic_eoi(uint8_t irq) {
-    if (irq >= 8) outb(PIC2_CMD, PIC_EOI);
-    outb(PIC1_CMD, PIC_EOI);
+void pic_init(void)
+{
+    uint8_t mask1;
+    uint8_t mask2;
+
+    /* Сохраняем текущие маски прерываний */
+    mask1 = 0xFF;
+    mask2 = 0xFF;
+
+    /* Начинаем перенастройку PIC */
+    outb(PIC1_COMMAND, 0x11);
+    outb(PIC2_COMMAND, 0x11);
+
+    /* Переносим IRQ в диапазон 32–47 */
+    outb(PIC1_DATA, 0x20);
+    outb(PIC2_DATA, 0x28);
+
+    /* Связываем контроллеры */
+    outb(PIC1_DATA, 0x04);
+    outb(PIC2_DATA, 0x02);
+
+    /* Режим 8086 */
+    outb(PIC1_DATA, 0x01);
+    outb(PIC2_DATA, 0x01);
+
+    /* Включаем только IRQ0–IRQ2 на главном PIC */
+    outb(PIC1_DATA, (uint8_t)(mask1 & 0xF8));
+    outb(PIC2_DATA, mask2);
 }
 
-void pic_mask(uint8_t irq) {
-    uint16_t port;
-    uint8_t val;
-    if (irq < 8) { port = PIC1_DATA; }
-    else         { port = PIC2_DATA; irq -= 8; }
-    val = inb(port) | (1 << irq);
-    outb(port, val);
-}
+void pic_eoi(uint8_t irq)
+{
+    if (irq >= 8) {
+        outb(PIC2_COMMAND, PIC_EOI);
+    }
 
-void pic_unmask(uint8_t irq) {
-    uint16_t port;
-    uint8_t val;
-    if (irq < 8) { port = PIC1_DATA; }
-    else         { port = PIC2_DATA; irq -= 8; }
-    val = inb(port) & ~(1 << irq);
-    outb(port, val);
+    outb(PIC1_COMMAND, PIC_EOI);
 }

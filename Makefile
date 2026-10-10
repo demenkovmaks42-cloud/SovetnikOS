@@ -1,32 +1,44 @@
 # =========================================================
-#  sovetnikOS 0.5 — Makefile
+# sovetnikOS 0.7
 # =========================================================
 
-CC      := gcc
-AS      := nasm
-LD      := ld
+CC := gcc
+AS := nasm
+LD := ld
 
-CFLAGS  := -m32 -ffreestanding -nostdlib \
-           -fno-stack-protector -fno-pic -fno-builtin \
-           -Wall -Wextra -O2 -Iinclude
+CFLAGS := -m32 -ffreestanding -nostdlib \
+          -fno-stack-protector -fno-pic \
+          -fno-builtin -Wall -Wextra \
+          -O2 -Iinclude
 
 LDFLAGS := -m elf_i386 -T linker.ld -nostdlib
 
-BUILD   := build
-KERNEL  := $(BUILD)/kernel.bin
-ISO     := $(BUILD)/sovetnikOS.iso
-INITRD  := $(BUILD)/initrd.tar
-DISK    := disk.img
+BUILD := build
 
-C_SRCS  := $(wildcard kernel/*.c) \
-           $(wildcard fs/*.c) \
-           $(wildcard drivers/*.c)
+KERNEL := $(BUILD)/kernel.bin
+ISO := $(BUILD)/sovetnikOS.iso
+INITRD := $(BUILD)/initrd.tar
 
-ASM_SRCS := $(wildcard boot/*.asm)
+DISK := disk.img
 
-C_OBJS  := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS))
-ASM_OBJS:= $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
-OBJS    := $(ASM_OBJS) $(C_OBJS)
+C_SRCS := \
+    $(wildcard kernel/*.c) \
+    $(wildcard fs/*.c) \
+    $(wildcard drivers/*.c) \
+    $(wildcard gui/*.c)
+
+ASM_SRCS := \
+    $(wildcard boot/*.asm)
+
+C_OBJS := \
+    $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS))
+
+ASM_OBJS := \
+    $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
+
+OBJS := \
+    $(ASM_OBJS) \
+    $(C_OBJS)
 
 all: $(ISO)
 
@@ -48,13 +60,26 @@ $(INITRD): $(shell find initrd -type f 2>/dev/null)
 
 $(ISO): $(KERNEL) $(INITRD) grub.cfg
 	@mkdir -p $(BUILD)/iso/boot/grub
-	cp $(KERNEL) $(BUILD)/iso/boot/kernel.bin
-	cp $(INITRD) $(BUILD)/iso/boot/initrd.tar
-	cp grub.cfg $(BUILD)/iso/boot/grub/grub.cfg
-	grub-mkrescue -o $@ $(BUILD)/iso
+
+	cp $(KERNEL) \
+	   $(BUILD)/iso/boot/kernel.bin
+
+	cp $(INITRD) \
+	   $(BUILD)/iso/boot/initrd.tar
+
+	cp grub.cfg \
+	   $(BUILD)/iso/boot/grub/grub.cfg
+
+	grub-mkrescue \
+	   -o $(ISO) \
+	   $(BUILD)/iso
 
 $(DISK):
-	dd if=/dev/zero of=$(DISK) bs=1M count=16
+	dd if=/dev/zero \
+	   of=$(DISK) \
+	   bs=1M \
+	   count=16 \
+	   status=progress
 
 run: $(ISO) $(DISK)
 	qemu-system-i386 \
@@ -63,7 +88,9 @@ run: $(ISO) $(DISK)
 	    -vga std
 
 run-nodisk: $(ISO)
-	qemu-system-i386 -cdrom $(ISO) -vga std
+	qemu-system-i386 \
+	    -cdrom $(ISO) \
+	    -vga std
 
 clean:
 	rm -rf $(BUILD)

@@ -3,7 +3,6 @@
 
 #include "types.h"
 
-/* Порты primary ATA (master) */
 #define ATA_DATA        0x1F0
 #define ATA_ERROR       0x1F1
 #define ATA_SECCOUNT    0x1F2
@@ -15,7 +14,6 @@
 #define ATA_COMMAND     0x1F7
 #define ATA_CONTROL     0x3F6
 
-/* Биты статуса */
 #define ATA_SR_BSY  0x80
 #define ATA_SR_DRDY 0x40
 #define ATA_SR_DF   0x20
@@ -25,26 +23,28 @@
 #define ATA_SR_IDX  0x02
 #define ATA_SR_ERR  0x01
 
-/* Команды */
-#define ATA_CMD_READ_PIO   0x20
-#define ATA_CMD_WRITE_PIO  0x30
-#define ATA_CMD_IDENTIFY   0xEC
+#define ATA_CMD_READ_PIO     0x20
+#define ATA_CMD_WRITE_PIO    0x30
+#define ATA_CMD_IDENTIFY     0xEC
+#define ATA_CMD_CACHE_FLUSH  0xE7
 
 #define ATA_SECTOR_SIZE 512
 
-/* Инициализация: проверяет наличие primary master, читает IDENTIFY */
-int  ata_init(void);
+int ata_init(void);
 
-/* Чтение count секторов начиная с LBA lba в buffer (count*512 байт) */
-int  ata_read_sectors(uint32_t lba, uint8_t count, void *buffer);
+int ata_read_sectors(
+    uint32_t lba,
+    uint8_t count,
+    void *buffer
+);
 
-/* Запись count секторов из buffer на диск */
-int  ata_write_sectors(uint32_t lba, uint8_t count, const void *buffer);
+int ata_write_sectors(
+    uint32_t lba,
+    uint8_t count,
+    const void *buffer
+);
 
-/* Модель диска (строка, заполняется после init) */
-const char* ata_model(void);
-
-/* Размер в секторах (из IDENTIFY) */
+const char *ata_model(void);
 uint32_t ata_sectors(void);
 
 #endif

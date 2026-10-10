@@ -228,3 +228,12 @@ int ramfs_ext_type(const char *name) {
 
     return RAMFS_SUB_NONE;
 }
+
+#define DISKFS_MAGIC          0x534F5631u
+#define DISKFS_VERSION       1u
+
+#define DISKFS_META_LBA      1u
+#define DISKFS_META_SECTORS  10u
+
+#define DISKFS_DATA_LBA      32u
+#define DISKFS_FILE_SECTORS  8u

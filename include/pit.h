@@ -3,9 +3,12 @@
 
 #include "types.h"
 
-#define PIT_FREQ 1193182
+#define PIT_BASE_FREQUENCY    1193182u
+#define PIT_DEFAULT_FREQUENCY 100u
 
-void     pit_init(uint32_t hz);
-uint32_t pit_ticks(void);
+extern volatile uint32_t pit_ticks;
+
+void pit_init(uint32_t hz);
+void pit_tick(void);
 
 #endif

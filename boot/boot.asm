@@ -1,42 +1,50 @@
-; Multiboot + точка входа (x86, 32-bit)
+; sovetnikOS 0.7 - Multiboot 1 entry
 BITS 32
 
 section .multiboot
-align 4                     ; Обязательное выравнивание по 4 байта
-    dd 0x1BADB002           ; magic
-    dd 0x00000007           ; flags: ALIGN + MEMINFO + VIDEO_MODE
-    dd -(0x1BADB002 + 0x00000007) ; checksum
+align 4
+    dd 0x1BADB002
+    dd 0x00000007
+    dd -(0x1BADB002 + 0x00000007)
 
-    ; AOUT kludge (эти пять dword-ов обязательны для работы видео-полей)
-    dd 0                    ; header_addr (игнорируется, если не установлен флаг 16)
-    dd 0                    ; load_addr
-    dd 0                    ; load_end_addr
-    dd 0                    ; bss_end_addr
-    dd 0                    ; entry_addr
+    ; AOUT fields
+    dd 0
+    dd 0
+    dd 0
+    dd 0
+    dd 0
 
-    ; Теперь идут поля видео-режима
-    dd 0                    ; mode_type: 0 = linear graphics
-    dd 1024                 ; width
-    dd 768                  ; height
-    dd 32                   ; depth
+    ; Linear graphics request
+    dd 0
+    dd 1024
+    dd 768
+    dd 32
 
 section .bss
 align 16
+
 stack_bottom:
-    resb 16384                          ; 16 KB стек
+    resb 16384
+
 stack_top:
 
 section .text
+
 global _start
 extern kmain
 
 _start:
     cli
     mov esp, stack_top
-    push ebx                            ; mbi
-    push eax                            ; magic
+    xor ebp, ebp
+
+    ; kmain(magic, mbi)
+    push ebx
+    push eax
     call kmain
+
 .hang:
+    cli
     hlt
     jmp .hang
 

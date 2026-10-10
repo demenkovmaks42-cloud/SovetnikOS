@@ -1,24 +1,48 @@
 #include "pit.h"
-#include "pic.h"
 
-#define PIT_CH0   0x40
-#define PIT_CMD   0x43
+#define PIT_CHANNEL0 0x40
+#define PIT_COMMAND  0x43
 
-static volatile uint32_t ticks = 0;
+volatile uint32_t pit_ticks = 0;
 
-static inline void outb(uint16_t port, uint8_t val) {
-    __asm__ volatile ("outb %0, %1" :: "a"(val), "Nd"(port));
+static uint32_t pit_frequency = PIT_DEFAULT_FREQUENCY;
+
+static inline void outb(uint16_t port, uint8_t value)
+{
+    __asm__ volatile (
+        "outb %0, %1"
+        :
+        : "a"(value), "Nd"(port)
+    );
 }
 
-void pit_init(uint32_t hz) {
-    uint32_t divisor = PIT_FREQ / hz;
-    outb(PIT_CMD, 0x36);   /* канал 0, lobyte/hibyte, mode 3 */
-    outb(PIT_CH0, (uint8_t)(divisor & 0xFF));
-    outb(PIT_CH0, (uint8_t)((divisor >> 8) & 0xFF));
-    ticks = 0;
+void pit_init(uint32_t hz)
+{
+    uint32_t divisor;
+
+    if (hz == 0) {
+        hz = PIT_DEFAULT_FREQUENCY;
+    }
+
+    divisor = PIT_BASE_FREQUENCY / hz;
+
+    if (divisor == 0) {
+        divisor = 1;
+    }
+
+    if (divisor > 65535u) {
+        divisor = 65535u;
+    }
+
+    pit_frequency = hz;
+    pit_ticks = 0;
+
+    outb(PIT_COMMAND, 0x36);
+    outb(PIT_CHANNEL0, (uint8_t)(divisor & 0xFFu));
+    outb(PIT_CHANNEL0, (uint8_t)((divisor >> 8) & 0xFFu));
 }
 
-uint32_t pit_ticks(void) { return ticks; }
-
-/* Вызывается из IRQ0 */
-void pit_tick(void) { ticks++; }
+void pit_tick(void)
+{
+    pit_ticks++;
+}
