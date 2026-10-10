@@ -11,11 +11,11 @@ static uint32_t fb_width   = 0;
 static uint32_t fb_height  = 0;
 static uint8_t  fb_bpp     = 0;
 
-static uint32_t cursor_x = 0;
+static uint32_t cursor_x = 0;   /* в пикселях */
 static uint32_t cursor_y = 0;
 
-static uint32_t fg_color = 0x00FFFFFF;
-static uint32_t bg_color = 0x00000000;
+static uint32_t fg_color = 0x00C0C0C0;  /* светло-серый */
+static uint32_t bg_color = 0x00000000;  /* чёрный */
 
 /* --- VGA text fallback --- */
 #define VGA_BUFFER ((volatile uint16_t*)0xB8000)
@@ -37,7 +37,6 @@ static void put_pixel(uint32_t x, uint32_t y, uint32_t color) {
         p[2] = (color >> 16) & 0xFF;
     } else if (fb_bpp == 16) {
         uint16_t *p = (uint16_t*)((uint8_t*)fb + offset);
-        /* RGB565 */
         uint16_t c = ((color >> 8) & 0xF800) |
         ((color >> 5) & 0x07E0) |
         ((color >> 3) & 0x001F);
@@ -76,7 +75,6 @@ static void fill_rect(uint32_t x, uint32_t y,
                                        }
 
                                        void vga_init(void) {
-                                           /* fallback — текстовый режим */
                                            for (int i = 0; i < VGA_WIDTH * VGA_HEIGHT; i++)
                                                VGA_BUFFER[i] = (text_color << 8) | ' ';
                                            text_row = 0;
@@ -85,6 +83,16 @@ static void fill_rect(uint32_t x, uint32_t y,
 
                                        void vga_set_fg(uint32_t rgb) { fg_color = rgb; }
                                        void vga_set_bg(uint32_t rgb) { bg_color = rgb; }
+
+                                       uint32_t vga_cols(void) {
+                                           if (fb) return fb_width / FONT_W;
+                                           return VGA_WIDTH;
+                                       }
+
+                                       uint32_t vga_rows(void) {
+                                           if (fb) return fb_height / FONT_H;
+                                           return VGA_HEIGHT;
+                                       }
 
                                        /* ================== Вывод ================== */
 
@@ -95,7 +103,6 @@ static void fill_rect(uint32_t x, uint32_t y,
                                                cursor_y = 0;
                                                return;
                                            }
-                                           /* fallback */
                                            for (int i = 0; i < VGA_WIDTH * VGA_HEIGHT; i++)
                                                VGA_BUFFER[i] = (text_color << 8) | ' ';
                                            text_row = 0;
@@ -105,6 +112,13 @@ static void fill_rect(uint32_t x, uint32_t y,
                                        void vga_putc(char c) {
                                            /* framebuffer path */
                                            if (fb) {
+                                               if (c == '\b') {
+                                                   if (cursor_x >= FONT_W) {
+                                                       cursor_x -= FONT_W;
+                                                       fill_rect(cursor_x, cursor_y, FONT_W, FONT_H, bg_color);
+                                                   }
+                                                   return;
+                                               }
                                                if (c == '\n') {
                                                    cursor_x = 0;
                                                    cursor_y += FONT_H;
@@ -117,6 +131,7 @@ static void fill_rect(uint32_t x, uint32_t y,
                                                if (c == '\r') { cursor_x = 0; return; }
                                                if (c == '\t') {
                                                    cursor_x = (cursor_x + FONT_W * 4) & ~(FONT_W * 4 - 1);
+                                                   if (cursor_x >= fb_width) cursor_x = fb_width - FONT_W;
                                                    return;
                                                }
                                                uint8_t ch = (uint8_t)c;
@@ -145,6 +160,7 @@ static void fill_rect(uint32_t x, uint32_t y,
                                            if (c == '\n') { text_col = 0; text_row++; }
                                            else if (c == '\r') { text_col = 0; }
                                            else if (c == '\t') { text_col = (text_col + 4) & ~3; }
+                                           else if (c == '\b') { if (text_col > 0) text_col--; }
                                            else {
                                                VGA_BUFFER[text_row * VGA_WIDTH + text_col] =
                                                (text_color << 8) | (uint8_t)c;

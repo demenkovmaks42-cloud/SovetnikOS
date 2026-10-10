@@ -25,4 +25,8 @@ void vga_write(const void *data, uint32_t size);
 void vga_set_fg(uint32_t rgb);
 void vga_set_bg(uint32_t rgb);
 
+/* Размеры экрана (символы) для framebuffer */
+uint32_t vga_cols(void);
+uint32_t vga_rows(void);
+
 #endif
