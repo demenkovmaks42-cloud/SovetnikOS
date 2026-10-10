@@ -3,6 +3,7 @@
 
 #include "types.h"
 
+/* 32-bit physical-address view retained for the existing shell. */
 extern uint32_t mem_heap_start;
 extern uint32_t mem_heap_end;
 extern uint32_t mem_heap_ptr;
@@ -13,9 +14,10 @@ uint32_t mem_total_ram(void);
 
 void *kmalloc(uint32_t size);
 void *mem_alloc(uint32_t size);
+void mem_free(void *ptr);
 
-uint32_t mem_get_heap_start(void);
-uint32_t mem_get_heap_end(void);
-uint32_t mem_get_heap_ptr(void);
+uint32_t mem_used(void);
+uint32_t mem_free_bytes(void);
+uint32_t mem_capacity(void);
 
 #endif

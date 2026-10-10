@@ -22,49 +22,85 @@ typedef struct {
 } __attribute__((packed)) tar_header_t;
 
 static tar_file_t files[TAR_MAX_FILES];
-static int count = 0;
+static int file_count = 0;
 
-static uint32_t oct2bin(const char *s, int n) {
-    uint32_t v = 0;
-    for (int i = 0; i < n; i++) {
-        if (s[i] < '0' || s[i] > '7') break;
-        v = v * 8 + (s[i] - '0');
+static uint32_t octal_to_u32(const char *text, uint32_t length)
+{
+    uint32_t value = 0, i = 0;
+    while (i < length && (text[i] == ' ' || text[i] == '\0')) ++i;
+    for (; i < length; ++i) {
+        if (text[i] < '0' || text[i] > '7') break;
+        if (value > (0xFFFFFFFFu - (uint32_t)(text[i] - '0')) / 8u) return 0xFFFFFFFFu;
+        value = value * 8u + (uint32_t)(text[i] - '0');
     }
-    return v;
+    return value;
 }
 
-void tar_init(void *addr) {
-    uint8_t *p = (uint8_t*)addr;
-    count = 0;
-    while (count < TAR_MAX_FILES) {
-        tar_header_t *h = (tar_header_t*)p;
-        if (h->name[0] == 0) break;
-        if (h->magic[0] != 'u' || h->magic[1] != 's' ||
-            h->magic[2] != 't' || h->magic[3] != 'a' ||
-            h->magic[4] != 'r') {
-            break;
-            }
-            uint32_t size = oct2bin(h->size, 11);
-        if (h->typeflag == '0' || h->typeflag == 0) {
-            strncpy(files[count].name, h->name, 100);
-            files[count].data = p + 512;
-            files[count].size = size;
-            count++;
+static int field_has_prefix(const char *field, const char *expected, uint32_t n)
+{
+    uint32_t i;
+    for (i = 0; i < n; ++i) if (field[i] != expected[i]) return 0;
+    return 1;
+}
+
+static void make_tar_name(char *out, const tar_header_t *header)
+{
+    uint32_t pos = 0, i = 0;
+    if (header->prefix[0]) {
+        while (i < sizeof(header->prefix) && header->prefix[i] && pos < 254u) out[pos++] = header->prefix[i++];
+        if (pos && pos < 255u) out[pos++] = '/';
+    }
+    i = 0;
+    while (i < sizeof(header->name) && header->name[i] && pos < 255u) out[pos++] = header->name[i++];
+    out[pos] = '\0';
+}
+
+void tar_init(void *addr)
+{
+    uint8_t *p = (uint8_t *)addr;
+    file_count = 0;
+    if (!p) return;
+
+    while (file_count < TAR_MAX_FILES) {
+        tar_header_t *header = (tar_header_t *)p;
+        uint32_t size, padded, step;
+        char name[256];
+
+        if (header->name[0] == '\0') break;
+        if (!field_has_prefix(header->magic, "ustar", 5)) break;
+        size = octal_to_u32(header->size, sizeof(header->size));
+        if (size == 0xFFFFFFFFu || size > 0x7FFFFFFFu) break;
+        if (size > 0xFFFFFFFFu - 511u) break;
+        padded = (size + 511u) & ~511u;
+        if (padded > 0xFFFFFFFFu - 512u) break;
+        step = 512u + padded;
+        make_tar_name(name, header);
+
+        /* Regular files only; RAMFS creates parent directories as needed. */
+        if (header->typeflag == '0' || header->typeflag == '\0') {
+            strncpy(files[file_count].name, name, sizeof(files[file_count].name) - 1);
+            files[file_count].name[sizeof(files[file_count].name) - 1] = '\0';
+            files[file_count].data = p + 512u;
+            files[file_count].size = size;
+            ++file_count;
         }
-        p += 512 + ((size + 511) / 512) * 512;
+        p += step;
     }
 }
 
-int tar_count(void) { return count; }
+int tar_count(void) { return file_count; }
 
-tar_file_t* tar_get(int index) {
-    if (index < 0 || index >= count) return NULL;
+tar_file_t *tar_get(int index)
+{
+    if (index < 0 || index >= file_count) return NULL;
     return &files[index];
 }
 
-tar_file_t* tar_find(const char *name) {
-    for (int i = 0; i < count; i++) {
+tar_file_t *tar_find(const char *name)
+{
+    int i;
+    if (!name) return NULL;
+    for (i = 0; i < file_count; ++i)
         if (strcmp(files[i].name, name) == 0) return &files[i];
-    }
     return NULL;
 }

@@ -1,11 +1,10 @@
 #include "pic.h"
 
-#define PIC1_COMMAND 0x20
-#define PIC1_DATA    0x21
-#define PIC2_COMMAND 0xA0
-#define PIC2_DATA    0xA1
-
-#define PIC_EOI      0x20
+#define PIC1_CMD  0x20
+#define PIC1_DATA 0x21
+#define PIC2_CMD  0xA0
+#define PIC2_DATA 0xA1
+#define PIC_EOI   0x20
 
 static inline void outb(uint16_t port, uint8_t value)
 {
@@ -16,41 +15,121 @@ static inline void outb(uint16_t port, uint8_t value)
     );
 }
 
+static inline uint8_t inb(uint16_t port)
+{
+    uint8_t value;
+
+    __asm__ volatile (
+        "inb %1, %0"
+        : "=a"(value)
+        : "Nd"(port)
+    );
+
+    return value;
+}
+
+static inline void io_wait(void)
+{
+    outb(0x80, 0);
+}
+
 void pic_init(void)
 {
-    uint8_t mask1;
-    uint8_t mask2;
+    /* Сохраняем исходные маски IRQ */
+    uint8_t mask1 = inb(PIC1_DATA);
+    uint8_t mask2 = inb(PIC2_DATA);
 
-    /* Сохраняем текущие маски прерываний */
-    mask1 = 0xFF;
-    mask2 = 0xFF;
+    /* Начинаем инициализацию обоих PIC */
+    outb(PIC1_CMD, 0x11);
+    io_wait();
+    outb(PIC2_CMD, 0x11);
+    io_wait();
 
-    /* Начинаем перенастройку PIC */
-    outb(PIC1_COMMAND, 0x11);
-    outb(PIC2_COMMAND, 0x11);
-
-    /* Переносим IRQ в диапазон 32–47 */
+    /* Переносим IRQ в диапазоны 32–39 и 40–47 */
     outb(PIC1_DATA, 0x20);
+    io_wait();
     outb(PIC2_DATA, 0x28);
+    io_wait();
 
-    /* Связываем контроллеры */
+    /* Настраиваем каскадирование */
     outb(PIC1_DATA, 0x04);
+    io_wait();
     outb(PIC2_DATA, 0x02);
+    io_wait();
 
-    /* Режим 8086 */
+    /* Режим совместимости с 8086 */
     outb(PIC1_DATA, 0x01);
+    io_wait();
     outb(PIC2_DATA, 0x01);
+    io_wait();
 
-    /* Включаем только IRQ0–IRQ2 на главном PIC */
-    outb(PIC1_DATA, (uint8_t)(mask1 & 0xF8));
+    /* Восстанавливаем исходные маски */
+    outb(PIC1_DATA, mask1);
     outb(PIC2_DATA, mask2);
 }
 
 void pic_eoi(uint8_t irq)
 {
-    if (irq >= 8) {
-        outb(PIC2_COMMAND, PIC_EOI);
+    if (irq >= 16) {
+        return;
     }
 
-    outb(PIC1_COMMAND, PIC_EOI);
+    if (irq >= 8) {
+        outb(PIC2_CMD, PIC_EOI);
+    }
+
+    outb(PIC1_CMD, PIC_EOI);
+}
+
+void pic_mask(uint8_t irq)
+{
+    uint16_t port;
+    uint8_t bit;
+    uint8_t value;
+
+    if (irq >= 16) {
+        return;
+    }
+
+    if (irq < 8) {
+        port = PIC1_DATA;
+        bit = irq;
+    } else {
+        port = PIC2_DATA;
+        bit = (uint8_t)(irq - 8);
+    }
+
+    value = inb(port);
+    value = (uint8_t)(value | (uint8_t)(1u << bit));
+    outb(port, value);
+}
+
+void pic_unmask(uint8_t irq)
+{
+    uint16_t port;
+    uint8_t bit;
+    uint8_t value;
+
+    if (irq >= 16) {
+        return;
+    }
+
+    if (irq < 8) {
+        port = PIC1_DATA;
+        bit = irq;
+    } else {
+        port = PIC2_DATA;
+        bit = (uint8_t)(irq - 8);
+    }
+
+    value = inb(port);
+    value = (uint8_t)(value & (uint8_t)~(1u << bit));
+    outb(port, value);
+
+    /* Для IRQ ведомого PIC нужен и IRQ2 главного */
+    if (irq >= 8) {
+        value = inb(PIC1_DATA);
+        value = (uint8_t)(value & (uint8_t)~(1u << 2));
+        outb(PIC1_DATA, value);
+    }
 }

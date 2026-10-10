@@ -1,4 +1,4 @@
-#include <stdint.h>
+#include "types.h"
 #include "shell.h"
 #include "vga.h"
 #include "keyboard.h"
@@ -37,7 +37,7 @@ static int parse_u32(const char *s, uint32_t *out)
     while (*s == ' ') ++s;
     while (*s >= '0' && *s <= '9') {
         uint32_t d = (uint32_t)(*s - '0');
-        if (n > (UINT32_MAX - d) / 10U) return 0;
+        if (n > (0xFFFFFFFFu - d) / 10U) return 0;
         n = n * 10U + d;
         ++s;
         digits = 1;
@@ -52,7 +52,7 @@ static void read_line(void)
 {
     uint32_t n = 0;
     vga_set_fg(COLOR_PROMPT);
-    vga_print("sovetnikOS:/ ");
+    vga_print("sovetnikOS:"); vga_print(ramfs_cwd()); vga_print(" $ ");
     vga_set_fg(COLOR_NORMAL);
 
     for (;;) {
@@ -121,26 +121,47 @@ static int resolve_path(const char *arg, char *out)
     return ramfs_resolve(arg, out) == 0;
 }
 
+/* Разрешаем создавать объекты только внутри существующего каталога. */
+static int parent_directory_exists(const char *path)
+{
+    char parent[RAMFS_PATH_MAX];
+    uint32_t len = (uint32_t)strlen(path);
+    uint32_t slash = len;
+
+    if (!path || !len || strcmp(path, "/") == 0) return 0;
+    if (len >= RAMFS_PATH_MAX) return 0;
+    memcpy(parent, path, len + 1);
+
+    while (slash > 0 && parent[slash - 1] != '/') --slash;
+    if (slash == 0) return 0;
+    if (slash == 1) parent[1] = '\0';
+    else parent[slash - 1] = '\0';
+
+    return ramfs_exists(parent) && ramfs_is_dir(parent);
+}
+
 static void cmd_help(void)
 {
     vga_print("Commands:\n"
-    " help, about, clear, reboot\n"
-    " ticks, mem, kmalloc N\n"
-    " ls, pwd, cd PATH, mkdir NAME, rmdir NAME\n"
-    " touch NAME, cat NAME, write NAME, append NAME, rm NAME\n"
-    " sov NAME, sp NAME\n"
-    " ata-info, ata-read LBA, ata-write LBA\n");
+              " help, about, clear, reboot\n"
+              " ticks, mem, kmalloc N\n"
+              " ls, pwd, cd PATH, mkdir NAME, rmdir NAME\n"
+              " touch NAME, cat NAME, write NAME, append NAME, rm NAME\n"
+              " sov NAME, sp NAME\n"
+              " ata-info, ata-read LBA, ata-write LBA\n");
 }
 
 static void cmd_mem(void)
 {
+    vga_print("Total RAM: ");
+    vga_print_dec(mem_total_ram() / 1024u / 1024u);
+    vga_print(" MB\n");
     vga_print("Heap start: "); vga_print_hex((uint32_t)mem_heap_start);
     vga_print("\nHeap end:   "); vga_print_hex((uint32_t)mem_heap_end);
     vga_print("\nHeap ptr:   "); vga_print_hex((uint32_t)mem_heap_ptr);
-    vga_print("\nHeap used:  ");
-    vga_print_dec((uint32_t)(mem_heap_ptr >= mem_heap_start ? mem_heap_ptr - mem_heap_start : 0));
-    vga_print(" bytes\nHeap free:  ");
-    vga_print_dec((uint32_t)(mem_heap_end >= mem_heap_ptr ? mem_heap_end - mem_heap_ptr : 0));
+    vga_print("\nHeap size:  "); vga_print_dec(mem_capacity());
+    vga_print(" bytes\nAllocated:  "); vga_print_dec(mem_used());
+    vga_print(" bytes\nFree blocks: "); vga_print_dec(mem_free_bytes());
     vga_print(" bytes\n");
 }
 
@@ -186,6 +207,7 @@ static void cmd_touch(const char *arg)
     char path[RAMFS_PATH_MAX];
     if (!resolve_path(arg, path)) { print_error("Usage: touch NAME\n"); return; }
     if (ramfs_exists(path)) { print_error("Already exists.\n"); return; }
+    if (!parent_directory_exists(path)) { print_error("Parent directory does not exist.\n"); return; }
     if (ramfs_create(path, RAMFS_TYPE_FILE) != 0) { print_error("Cannot create file.\n"); return; }
     vga_set_fg(COLOR_OK); vga_print("Created: "); vga_print(path); vga_putc('\n'); vga_set_fg(COLOR_NORMAL);
 }
@@ -197,6 +219,7 @@ static void cmd_write(const char *arg, int append)
     uint32_t size = 0;
     if (!resolve_path(arg, path)) { print_error("Usage: write NAME\n"); return; }
     int exists = ramfs_exists(path);
+    if (!exists && !parent_directory_exists(path)) { print_error("Parent directory does not exist.\n"); return; }
     if (exists && ramfs_is_dir(path)) { print_error("Is a directory.\n"); return; }
     if (!exists && ramfs_create(path, RAMFS_TYPE_FILE) != 0) { print_error("Cannot create file.\n"); return; }
     if (append && exists) {
@@ -227,6 +250,7 @@ static void cmd_cd(const char *arg)
 {
     char path[RAMFS_PATH_MAX];
     if (!arg || !*arg) { ramfs_set_cwd("/"); return; }
+    if (strcmp(arg, ".") == 0) return;
     if (strcmp(arg, "..") == 0) {
         char parent[RAMFS_PATH_MAX];
         const char *cwd = ramfs_cwd();
@@ -249,6 +273,7 @@ static void cmd_mkdir(const char *arg, int directory)
     char path[RAMFS_PATH_MAX];
     if (!resolve_path(arg, path)) { print_error(directory ? "Usage: mkdir NAME\n" : "Usage: rmdir NAME\n"); return; }
     if (directory) {
+        if (!parent_directory_exists(path)) { print_error("Parent directory does not exist.\n"); return; }
         if (ramfs_exists(path)) { print_error("Already exists.\n"); return; }
         if (ramfs_create(path, RAMFS_TYPE_DIR) != 0) { print_error("Cannot create directory.\n"); return; }
     } else {
@@ -317,7 +342,7 @@ static void dispatch(char *cmd)
         if (!parse_u32(arg, &n) || n == 0) { print_error("Usage: kmalloc N\n"); return; }
         void *p = mem_alloc(n);
         if (!p) { print_error("Out of memory or heap not initialized.\n"); return; }
-        vga_print("Allocated "); vga_print_dec(n); vga_print(" bytes at "); vga_print_hex((uint32_t)(uintptr_t)p); vga_putc('\n');
+        vga_print("Allocated "); vga_print_dec(n); vga_print(" bytes at "); vga_print_hex((uint32_t)p); vga_putc('\n');
     }
     else if (strcmp(cmd, "ls") == 0) cmd_ls();
     else if (strcmp(cmd, "pwd") == 0) { vga_print(ramfs_cwd()); vga_putc('\n'); }
