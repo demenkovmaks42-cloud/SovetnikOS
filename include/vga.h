@@ -37,6 +37,8 @@ uint32_t vga_height(void);
 
 int vga_is_framebuffer(void);
 
+uint32_t vga_read_pixel(uint32_t x, uint32_t y);
+
 void vga_draw_pixel(
     uint32_t x,
     uint32_t y,

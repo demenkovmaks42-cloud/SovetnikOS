@@ -16,60 +16,75 @@ typedef struct {
 } __attribute__((packed)) idt_ptr_t;
 
 static idt_entry_t idt[256];
-static idt_ptr_t   idtp;
+static idt_ptr_t idtp;
 
 extern void idt_load(uint32_t);
 
-/* ассемблерные обёртки (см. boot/isr_stubs.asm) */
-extern void irq0_stub(void);
-extern void irq1_stub(void);
-extern void irq2_stub(void);
-extern void irq3_stub(void);
-extern void irq4_stub(void);
-extern void irq5_stub(void);
-extern void irq6_stub(void);
-extern void irq7_stub(void);
-extern void irq8_stub(void);
-extern void irq9_stub(void);
-extern void irq10_stub(void);
-extern void irq11_stub(void);
-extern void irq12_stub(void);
-extern void irq13_stub(void);
-extern void irq14_stub(void);
-extern void irq15_stub(void);
+#define DECLARE_EXCEPTION(n) extern void exception_stub_##n(void)
+DECLARE_EXCEPTION(0);  DECLARE_EXCEPTION(1);  DECLARE_EXCEPTION(2);
+DECLARE_EXCEPTION(3);  DECLARE_EXCEPTION(4);  DECLARE_EXCEPTION(5);
+DECLARE_EXCEPTION(6);  DECLARE_EXCEPTION(7);  DECLARE_EXCEPTION(8);
+DECLARE_EXCEPTION(9);  DECLARE_EXCEPTION(10); DECLARE_EXCEPTION(11);
+DECLARE_EXCEPTION(12); DECLARE_EXCEPTION(13); DECLARE_EXCEPTION(14);
+DECLARE_EXCEPTION(15); DECLARE_EXCEPTION(16); DECLARE_EXCEPTION(17);
+DECLARE_EXCEPTION(18); DECLARE_EXCEPTION(19); DECLARE_EXCEPTION(20);
+DECLARE_EXCEPTION(21); DECLARE_EXCEPTION(22); DECLARE_EXCEPTION(23);
+DECLARE_EXCEPTION(24); DECLARE_EXCEPTION(25); DECLARE_EXCEPTION(26);
+DECLARE_EXCEPTION(27); DECLARE_EXCEPTION(28); DECLARE_EXCEPTION(29);
+DECLARE_EXCEPTION(30); DECLARE_EXCEPTION(31);
+#undef DECLARE_EXCEPTION
 
-void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags) {
-    idt[num].base_low  = base & 0xFFFF;
-    idt[num].base_high = (base >> 16) & 0xFFFF;
-    idt[num].sel       = sel;
-    idt[num].always0   = 0;
-    idt[num].flags     = flags;
+extern void irq0_stub(void);  extern void irq1_stub(void);
+extern void irq2_stub(void);  extern void irq3_stub(void);
+extern void irq4_stub(void);  extern void irq5_stub(void);
+extern void irq6_stub(void);  extern void irq7_stub(void);
+extern void irq8_stub(void);  extern void irq9_stub(void);
+extern void irq10_stub(void); extern void irq11_stub(void);
+extern void irq12_stub(void); extern void irq13_stub(void);
+extern void irq14_stub(void); extern void irq15_stub(void);
+
+void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags)
+{
+    idt[num].base_low = (uint16_t)(base & 0xFFFFu);
+    idt[num].base_high = (uint16_t)((base >> 16) & 0xFFFFu);
+    idt[num].sel = sel;
+    idt[num].always0 = 0;
+    idt[num].flags = flags;
 }
 
-void idt_init(void) {
-    idtp.limit = sizeof(idt_entry_t) * 256 - 1;
-    idtp.base  = (uint32_t)&idt;
+void idt_init(void)
+{
+    static void (*const exceptions[32])(void) = {
+        exception_stub_0, exception_stub_1, exception_stub_2, exception_stub_3,
+        exception_stub_4, exception_stub_5, exception_stub_6, exception_stub_7,
+        exception_stub_8, exception_stub_9, exception_stub_10, exception_stub_11,
+        exception_stub_12, exception_stub_13, exception_stub_14, exception_stub_15,
+        exception_stub_16, exception_stub_17, exception_stub_18, exception_stub_19,
+        exception_stub_20, exception_stub_21, exception_stub_22, exception_stub_23,
+        exception_stub_24, exception_stub_25, exception_stub_26, exception_stub_27,
+        exception_stub_28, exception_stub_29, exception_stub_30, exception_stub_31
+    };
+    static void (*const irqs[16])(void) = {
+        irq0_stub, irq1_stub, irq2_stub, irq3_stub,
+        irq4_stub, irq5_stub, irq6_stub, irq7_stub,
+        irq8_stub, irq9_stub, irq10_stub, irq11_stub,
+        irq12_stub, irq13_stub, irq14_stub, irq15_stub
+    };
+    uint32_t i;
 
-    for (int i = 0; i < 256; i++)
-        idt_set_gate(i, 0, 0, 0);
+    idtp.limit = (uint16_t)(sizeof(idt) - 1u);
+    idtp.base = (uint32_t)&idt;
 
-    /* IRQ0..15 → векторы 32..47, селектор 0x08, флаг 0x8E */
-    idt_set_gate(32, (uint32_t)irq0_stub,  0x08, 0x8E);
-    idt_set_gate(33, (uint32_t)irq1_stub,  0x08, 0x8E);
-    idt_set_gate(34, (uint32_t)irq2_stub,  0x08, 0x8E);
-    idt_set_gate(35, (uint32_t)irq3_stub,  0x08, 0x8E);
-    idt_set_gate(36, (uint32_t)irq4_stub,  0x08, 0x8E);
-    idt_set_gate(37, (uint32_t)irq5_stub,  0x08, 0x8E);
-    idt_set_gate(38, (uint32_t)irq6_stub,  0x08, 0x8E);
-    idt_set_gate(39, (uint32_t)irq7_stub,  0x08, 0x8E);
-    idt_set_gate(40, (uint32_t)irq8_stub,  0x08, 0x8E);
-    idt_set_gate(41, (uint32_t)irq9_stub,  0x08, 0x8E);
-    idt_set_gate(42, (uint32_t)irq10_stub, 0x08, 0x8E);
-    idt_set_gate(43, (uint32_t)irq11_stub, 0x08, 0x8E);
-    idt_set_gate(44, (uint32_t)irq12_stub, 0x08, 0x8E);
-    idt_set_gate(45, (uint32_t)irq13_stub, 0x08, 0x8E);
-    idt_set_gate(46, (uint32_t)irq14_stub, 0x08, 0x8E);
-    idt_set_gate(47, (uint32_t)irq15_stub, 0x08, 0x8E);
+    for (i = 0; i < 256u; ++i)
+        idt_set_gate((uint8_t)i, 0, 0, 0);
+
+    /* Install CPU exception handlers first: vectors 0..31. */
+    for (i = 0; i < 32u; ++i)
+        idt_set_gate((uint8_t)i, (uint32_t)exceptions[i], 0x08, 0x8E);
+
+    /* Remapped legacy PIC IRQs: vectors 32..47. */
+    for (i = 0; i < 16u; ++i)
+        idt_set_gate((uint8_t)(32u + i), (uint32_t)irqs[i], 0x08, 0x8E);
 
     idt_load((uint32_t)&idtp);
 }

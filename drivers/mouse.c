@@ -1,43 +1,35 @@
 #include "mouse.h"
-#include "vga.h"
+#include "keyboard.h"
 
-#define MOUSE_DATA   0x60
-#define MOUSE_STATUS 0x64
-#define MOUSE_CMD    0x64
+#define PS2_DATA_PORT   0x60
+#define PS2_STATUS_PORT 0x64
+#define PS2_COMMAND_PORT 0x64
 
-static mouse_state_t mouse = {
-    32,
-    32,
-    0,
-    0,
-    0
-};
+#define STATUS_OUTPUT_FULL 0x01
+#define STATUS_INPUT_FULL  0x02
+#define STATUS_AUX_DATA    0x20
+
+#define MOUSE_LEFT   0x01
+#define MOUSE_RIGHT  0x02
+#define MOUSE_MIDDLE 0x04
+
+static volatile int mx = 160;
+static volatile int my = 100;
+static volatile uint8_t buttons = 0;
+
+static uint32_t mouse_width = 320;
+static uint32_t mouse_height = 200;
 
 static uint8_t packet[3];
+static uint8_t packet_pos = 0;
+static int present = 0;
 
-static int packet_index = 0;
-static int available = 0;
-
-static inline void outb(
-    uint16_t port,
-    uint8_t value
-)
-{
-    __asm__ volatile (
-        "outb %0,%1"
-        :
-        : "a"(value), "Nd"(port)
-    );
-}
-
-static inline uint8_t inb(
-    uint16_t port
-)
+static inline uint8_t inb(uint16_t port)
 {
     uint8_t value;
 
     __asm__ volatile (
-        "inb %1,%0"
+        "inb %1, %0"
         : "=a"(value)
         : "Nd"(port)
     );
@@ -45,220 +37,203 @@ static inline uint8_t inb(
     return value;
 }
 
-static void wait_write(void)
+static inline void outb(uint16_t port, uint8_t value)
 {
-    for (uint32_t i = 0;
-         i < 100000;
-    i++) {
-
-        if (!(inb(MOUSE_STATUS) & 2))
-            return;
-    }
-}
-
-static int wait_read(void)
-{
-    for (uint32_t i = 0;
-         i < 100000;
-    i++) {
-
-        if (inb(MOUSE_STATUS) & 1)
-            return 0;
-    }
-
-    return -1;
-}
-
-static void mouse_write(
-    uint8_t value
-)
-{
-    wait_write();
-
-    outb(
-        MOUSE_CMD,
-         0xD4
-    );
-
-    wait_write();
-
-    outb(
-        MOUSE_DATA,
-         value
+    __asm__ volatile (
+        "outb %0, %1"
+        :
+        : "a"(value), "Nd"(port)
     );
 }
 
-static int mouse_read(
-    uint8_t *value
-)
+static int wait_input_clear(void)
 {
-    if (wait_read())
-        return -1;
-
-    *value =
-    inb(MOUSE_DATA);
+    for (uint32_t i = 0; i < 100000u; ++i) {
+        if (!(inb(PS2_STATUS_PORT) & STATUS_INPUT_FULL))
+            return 1;
+    }
 
     return 0;
 }
 
+
+static int controller_command(uint8_t command)
+{
+    if (!wait_input_clear())
+        return 0;
+
+    outb(PS2_COMMAND_PORT, command);
+    return 1;
+}
+
+static int mouse_write(uint8_t value)
+{
+    if (!controller_command(0xD4))
+        return 0;
+
+    if (!wait_input_clear())
+        return 0;
+
+    outb(PS2_DATA_PORT, value);
+    return 1;
+}
+
+static int mouse_command(uint8_t command)
+{
+    uint8_t response;
+
+    if (!mouse_write(command))
+        return 0;
+
+    for (uint32_t i = 0; i < 100000u; ++i) {
+        if (!(inb(PS2_STATUS_PORT) & STATUS_OUTPUT_FULL))
+            continue;
+
+        uint8_t status = inb(PS2_STATUS_PORT);
+        uint8_t value = inb(PS2_DATA_PORT);
+
+        if (status & STATUS_AUX_DATA) {
+            response = value;
+            return response == 0xFA;
+        }
+
+        /* Не теряем байт клавиатуры. */
+        keyboard_push_byte(value);
+    }
+
+    return 0;
+}
+
+static void clamp_cursor(void)
+{
+    if (mouse_width == 0)
+        mouse_width = 1;
+
+    if (mouse_height == 0)
+        mouse_height = 1;
+
+    if (mx < 0)
+        mx = 0;
+
+    if (my < 0)
+        my = 0;
+
+    if ((uint32_t)mx >= mouse_width)
+        mx = (int)(mouse_width - 1);
+
+    if ((uint32_t)my >= mouse_height)
+        my = (int)(mouse_height - 1);
+}
+
+void mouse_set_bounds(uint32_t width, uint32_t height)
+{
+    if (width == 0 || height == 0)
+        return;
+
+    mouse_width = width;
+    mouse_height = height;
+
+    clamp_cursor();
+}
+
 void mouse_init(void)
 {
-    /*
-     * Enable auxiliary device.
-     */
-    wait_write();
+    present = 0;
+    packet_pos = 0;
+    buttons = 0;
 
-    outb(
-        MOUSE_CMD,
-         0xA8
-    );
-
-    /*
-     * Read controller command byte.
-     */
-    wait_write();
-
-    outb(
-        MOUSE_CMD,
-         0x20
-    );
-
-    uint8_t status;
-
-    if (mouse_read(&status))
+    if (!controller_command(0xA8))
         return;
 
     /*
-     * Enable mouse data.
-     *
-     * IRQ12 remains disabled because
-     * 0.7 uses polling.
+     * Включаем вспомогательный порт.
+     * Затем включаем передачу данных мышью.
      */
-    status |= 0x02;
-    status &= (uint8_t)~0x20;
-
-    wait_write();
-
-    outb(
-        MOUSE_CMD,
-         0x60
-    );
-
-    wait_write();
-
-    outb(
-        MOUSE_DATA,
-         status
-    );
-
-    /*
-     * Set defaults.
-     */
-    mouse_write(0xF6);
-
-    if (mouse_read(&status))
+    if (!mouse_command(0xF6))
         return;
 
-    /*
-     * Enable data reporting.
-     */
-    mouse_write(0xF4);
-
-    if (mouse_read(&status))
+    if (!mouse_command(0xF4))
         return;
 
-    mouse.x =
-    (int)(vga_width() / 2);
+    mx = (int)(mouse_width / 2u);
+    my = (int)(mouse_height / 2u);
 
-    mouse.y =
-    (int)(vga_height() / 2);
-
-    packet_index = 0;
-    available = 1;
+    clamp_cursor();
+    present = 1;
 }
 
 void mouse_poll(void)
 {
-    if (!available)
-        return;
+    while (inb(PS2_STATUS_PORT) & STATUS_OUTPUT_FULL) {
+        uint8_t status = inb(PS2_STATUS_PORT);
+        uint8_t value = inb(PS2_DATA_PORT);
 
-    while (inb(MOUSE_STATUS) & 1) {
-
-        uint8_t status =
-        inb(MOUSE_STATUS);
-
-        /*
-         * Ignore keyboard data.
-         */
-        if (!(status & 0x20)) {
-            (void)inb(MOUSE_DATA);
+        if (!(status & STATUS_AUX_DATA)) {
+            keyboard_push_byte(value);
             continue;
         }
 
-        uint8_t byte =
-        inb(MOUSE_DATA);
-
         /*
-         * First byte always has bit 3 set.
+         * Бит 3 должен быть установлен в первом байте
+         * стандартного PS/2-пакета.
          */
-        if (packet_index == 0 &&
-            !(byte & 0x08))
+        if (packet_pos == 0 && !(value & 0x08u))
             continue;
 
-        packet[packet_index++] =
-        byte;
+        packet[packet_pos++] = value;
 
-        if (packet_index < 3)
+        if (packet_pos < 3)
             continue;
 
-        packet_index = 0;
+        uint8_t flags = packet[0];
 
-        int dx =
-        (int)packet[1];
+        /* Пропускаем пакеты с переполнением координат. */
+        if (!(flags & 0xC0u)) {
+            int dx = (int)(int8_t)packet[1];
+            int dy = (int)(int8_t)packet[2];
 
-        int dy =
-        (int)packet[2];
+            mx += dx;
+            my -= dy;
+        }
 
-        if (packet[0] & 0x10)
-            dx -= 256;
+        buttons = flags & 0x07u;
+        packet_pos = 0;
 
-        if (packet[0] & 0x20)
-            dy -= 256;
-
-        mouse.x += dx;
-        mouse.y -= dy;
-
-        if (mouse.x < 0)
-            mouse.x = 0;
-
-        if (mouse.y < 0)
-            mouse.y = 0;
-
-        if (mouse.x >= (int)vga_width())
-            mouse.x =
-            (int)vga_width() - 1;
-
-        if (mouse.y >= (int)vga_height())
-            mouse.y =
-            (int)vga_height() - 1;
-
-        mouse.left =
-        (packet[0] & 1) != 0;
-
-        mouse.right =
-        (packet[0] & 2) != 0;
-
-        mouse.middle =
-        (packet[0] & 4) != 0;
+        clamp_cursor();
     }
 }
 
-mouse_state_t mouse_get_state(void)
+int mouse_x(void)
 {
-    return mouse;
+    return mx;
 }
 
-int mouse_available(void)
+int mouse_y(void)
 {
-    return available;
+    return my;
+}
+
+uint8_t mouse_buttons(void)
+{
+    return buttons;
+}
+
+int mouse_present(void)
+{
+    return present;
+}
+
+int mouse_left_pressed(void)
+{
+    return (buttons & MOUSE_LEFT) != 0;
+}
+
+int mouse_right_pressed(void)
+{
+    return (buttons & MOUSE_RIGHT) != 0;
+}
+
+int mouse_middle_pressed(void)
+{
+    return (buttons & MOUSE_MIDDLE) != 0;
 }

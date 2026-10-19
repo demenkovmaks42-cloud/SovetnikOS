@@ -2,6 +2,7 @@
 #include "multiboot.h"
 #include "vga.h"
 #include "keyboard.h"
+#include "mouse.h"
 #include "mem.h"
 #include "tar.h"
 #include "ramfs.h"
@@ -11,11 +12,31 @@
 #include "pic.h"
 #include "pit.h"
 #include "shell.h"
+#include "gui.h"
 
 extern uint32_t _kernel_end;
 
 void irq0_handler(void) { pit_tick(); pic_eoi(0); }
-void irq1_handler(void) { pic_eoi(1); }
+void irq1_handler(void)
+{
+    /*
+     * IRQ1 must read the keyboard byte from port 0x60.
+     * Without this, the keyboard controller keeps the byte
+     * pending and keyboard_push_byte() never receives input.
+     */
+    uint8_t status;
+    uint8_t data;
+
+    __asm__ volatile ("inb $0x64, %0" : "=a"(status));
+    if (status & 0x01u) {
+        __asm__ volatile ("inb $0x60, %0" : "=a"(data));
+        /* IRQ1 is the keyboard path; do not consume AUX bytes here. */
+        if (!(status & 0x20u))
+            keyboard_push_byte(data);
+    }
+
+    pic_eoi(1);
+}
 void irq2_handler(void) { pic_eoi(2); }
 void irq3_handler(void) { pic_eoi(3); }
 void irq4_handler(void) { pic_eoi(4); }
@@ -88,6 +109,73 @@ static int find_heap_region(multiboot_info_t *mbi, uint32_t floor,
         return 1;
     }
     return 0;
+}
+
+
+#define CURSOR_W 10u
+#define CURSOR_H 14u
+
+static uint32_t cursor_saved[CURSOR_W * CURSOR_H];
+static int cursor_drawn = 0;
+static int cursor_saved_x = 0;
+static int cursor_saved_y = 0;
+static uint32_t cursor_saved_w = 0;
+static uint32_t cursor_saved_h = 0;
+
+static void cursor_hide(void)
+{
+    uint32_t x, y;
+
+    if (!cursor_drawn) return;
+
+    for (y = 0; y < cursor_saved_h; ++y) {
+        for (x = 0; x < cursor_saved_w; ++x) {
+            vga_draw_pixel((uint32_t)cursor_saved_x + x,
+                           (uint32_t)cursor_saved_y + y,
+                           cursor_saved[y * CURSOR_W + x]);
+        }
+    }
+
+    cursor_drawn = 0;
+}
+
+static void cursor_show(int x, int y)
+{
+    uint32_t w = vga_width(), h = vga_height();
+    uint32_t xx, yy;
+
+    if (x < 0 || y < 0 || (uint32_t)x >= w || (uint32_t)y >= h)
+        return;
+
+    cursor_saved_x = x;
+    cursor_saved_y = y;
+    cursor_saved_w = (w - (uint32_t)x < CURSOR_W)
+                   ? w - (uint32_t)x : CURSOR_W;
+    cursor_saved_h = (h - (uint32_t)y < CURSOR_H)
+                   ? h - (uint32_t)y : CURSOR_H;
+
+    for (yy = 0; yy < cursor_saved_h; ++yy) {
+        for (xx = 0; xx < cursor_saved_w; ++xx) {
+            cursor_saved[yy * CURSOR_W + xx] =
+                vga_read_pixel((uint32_t)x + xx, (uint32_t)y + yy);
+        }
+    }
+
+    /* Small, high-contrast cursor; draw only this 10x14 region. */
+    for (yy = 0; yy < CURSOR_H && yy < cursor_saved_h; ++yy) {
+        for (xx = 0; xx < CURSOR_W && xx < cursor_saved_w; ++xx) {
+            if (xx == 0 || (yy == 0 && xx < 9) ||
+                (xx == 1 && yy < 11) ||
+                (yy == 10 && xx < 6) ||
+                (xx == 5 && yy >= 10 && yy < 13)) {
+                vga_draw_pixel((uint32_t)x + xx, (uint32_t)y + yy, 0xFFFFFF);
+            } else if (xx == 2 || (yy == 1 && xx < 8)) {
+                vga_draw_pixel((uint32_t)x + xx, (uint32_t)y + yy, 0x101820);
+            }
+        }
+    }
+
+    cursor_drawn = 1;
 }
 
 void kmain(uint32_t magic, multiboot_info_t *mbi)
@@ -225,7 +313,54 @@ void kmain(uint32_t magic, multiboot_info_t *mbi)
     idt_init();
     pic_init();
     pit_init(100);
+
+    /*
+     * Initialize the polled PS/2 mouse before enabling interrupts.
+     * The mouse is polled in the GUI loop; IRQ12 is not required.
+     */
+    mouse_set_bounds(vga_width(), vga_height());
+    mouse_init();
+
     __asm__ volatile ("sti");
+
+    if (vga_is_framebuffer()) {
+        int old_x = -1;
+        int old_y = -1;
+        int left_was_down = 0;
+        char key;
+
+        gui_init();
+        gui_run();
+
+        for (;;) {
+            mouse_poll();
+
+            /* Обрабатываем только переход кнопки из отпущенного состояния в нажатое. */
+            {
+                int left_is_down = (mouse_buttons() & 1u) != 0;
+                if (left_is_down && !left_was_down)
+                    gui_handle_click(mouse_x(), mouse_y());
+                left_was_down = left_is_down;
+            }
+
+            if (mouse_x() != old_x || mouse_y() != old_y) {
+                cursor_hide();
+                old_x = mouse_x();
+                old_y = mouse_y();
+                cursor_show(old_x, old_y);
+            }
+
+            while (keyboard_read_char(&key)) {
+                /* Keep the hardware cursor above any window repaint. */
+                cursor_hide();
+                gui_handle_key(key);
+                cursor_show(mouse_x(), mouse_y());
+            }
+
+            /* PIT IRQ wakes the CPU periodically so PS/2 can be polled. */
+            __asm__ volatile ("hlt");
+        }
+    }
 
     shell_run();
     halt_forever();

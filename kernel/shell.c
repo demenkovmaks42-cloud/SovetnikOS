@@ -142,13 +142,29 @@ static int parent_directory_exists(const char *path)
 
 static void cmd_help(void)
 {
-    vga_print("Commands:\n"
-              " help, about, clear, reboot\n"
-              " ticks, mem, kmalloc N\n"
-              " ls, pwd, cd PATH, mkdir NAME, rmdir NAME\n"
-              " touch NAME, cat NAME, write NAME, append NAME, rm NAME\n"
-              " sov NAME, sp NAME\n"
-              " ata-info, ata-read LBA, ata-write LBA\n");
+    vga_print("SovetnikOS commands (RAMFS is temporary):\n"
+              " help        - list commands\n"
+              " about       - show OS information\n"
+              " clear       - clear the text console\n"
+              " reboot      - restart the machine\n"
+              " ticks       - show PIT timer ticks\n"
+              " mem         - show RAM/heap statistics\n"
+              " kmalloc N   - allocate N bytes from kernel heap\n"
+              " ls          - list current directory\n"
+              " pwd         - print current directory\n"
+              " cd PATH     - change directory; cd .. goes to parent\n"
+              " mkdir NAME  - create directory\n"
+              " rmdir NAME  - remove an empty directory\n"
+              " touch NAME  - create an empty file\n"
+              " cat NAME    - print a file\n"
+              " write NAME  - replace/create file text; dot line saves\n"
+              " append NAME - append text; dot line saves\n"
+              " rm NAME     - delete a file\n"
+              " sov NAME    - create/edit a .sov file\n"
+              " sp NAME     - create/edit a .sp file\n"
+              " ata-info    - show detected ATA disk information\n"
+              " ata-read LBA  - dump one 512-byte sector\n"
+              " ata-write LBA - replace one sector (DANGEROUS)\n");
 }
 
 static void cmd_mem(void)
@@ -335,7 +351,7 @@ static void dispatch(char *cmd)
     else if (strcmp(cmd, "about") == 0) vga_print("sovetnikOS - minimal x86 operating system\n");
     else if (strcmp(cmd, "clear") == 0) vga_clear();
     else if (strcmp(cmd, "reboot") == 0) { __asm__ volatile ("cli"); while (1) __asm__ volatile ("outb %0, %1" :: "a"((uint8_t)0xFE), "Nd"((uint16_t)0x64)); }
-    else if (strcmp(cmd, "ticks") == 0) { vga_print("Ticks: "); vga_print_dec(pit_ticks); vga_putc('\n'); }
+    else if (strcmp(cmd, "ticks") == 0) { vga_print("Ticks: "); vga_print_dec(pit_ticks()); vga_putc('\n'); }
     else if (strcmp(cmd, "mem") == 0) cmd_mem();
     else if (strcmp(cmd, "kmalloc") == 0) {
         uint32_t n;

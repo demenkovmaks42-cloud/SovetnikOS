@@ -589,6 +589,43 @@ void vga_write(const void *data, uint32_t size)
  * Графические функции для GUI и мыши
  * ========================================================= */
 
+uint32_t vga_read_pixel(uint32_t x, uint32_t y)
+{
+    uint32_t bytes_per_pixel, offset;
+
+    if (fb == NULL || x >= fb_width || y >= fb_height)
+        return 0;
+
+    if (fb_bpp != 16 && fb_bpp != 24 && fb_bpp != 32)
+        return 0;
+
+    bytes_per_pixel = (uint32_t)fb_bpp / 8u;
+    offset = y * fb_pitch + x * bytes_per_pixel;
+
+    if (fb_bpp == 32) {
+        volatile uint32_t *p = (volatile uint32_t *)(fb + offset);
+        return *p & 0x00FFFFFFu;
+    }
+
+    if (fb_bpp == 24) {
+        return (uint32_t)fb[offset] |
+               ((uint32_t)fb[offset + 1] << 8) |
+               ((uint32_t)fb[offset + 2] << 16);
+    }
+
+    {
+        volatile uint16_t *p = (volatile uint16_t *)(fb + offset);
+        uint32_t c = *p;
+        uint32_t r = (c >> 11) & 0x1Fu;
+        uint32_t g = (c >> 5) & 0x3Fu;
+        uint32_t b = c & 0x1Fu;
+        r = (r << 3) | (r >> 2);
+        g = (g << 2) | (g >> 4);
+        b = (b << 3) | (b >> 2);
+        return (r << 16) | (g << 8) | b;
+    }
+}
+
 void vga_draw_pixel(uint32_t x, uint32_t y, uint32_t color)
 {
     put_pixel(x, y, color & 0x00FFFFFFu);

@@ -3,20 +3,19 @@
 
 #include "types.h"
 
-typedef struct {
-    int x;
-    int y;
-
-    int left;
-    int right;
-    int middle;
-} mouse_state_t;
-
 void mouse_init(void);
 void mouse_poll(void);
 
-mouse_state_t mouse_get_state(void);
+int mouse_x(void);
+int mouse_y(void);
 
-int mouse_available(void);
+uint8_t mouse_buttons(void);
+int mouse_present(void);
+
+void mouse_set_bounds(uint32_t width, uint32_t height);
+
+int mouse_left_pressed(void);
+int mouse_right_pressed(void);
+int mouse_middle_pressed(void);
 
 #endif
